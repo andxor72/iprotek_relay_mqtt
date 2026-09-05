@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>IPROTEK · MQTT Remote Relay Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+  <!-- Paho MQTT WebSocket Client Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: rgba(22, 27, 34, 0.85);
+      --card-border: rgba(48, 54, 61, 0.7);
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.35);
+      --accent-dim: #064e3b;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --text: #f0f6fc;
+      --text-muted: #8b949e;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-display: 'Oswald', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: radial-gradient(circle at 50% 0%, #1a2230 0%, var(--bg) 80%);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 24px 16px 48px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 540px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 12px;
+    }
+    .brand {
+      display: flex;
+      flex-direction: column;
+    }
+    .brand h1 {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      letter-spacing: 1px;
+      line-height: 1.1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .brand h1 span { color: var(--accent); }
+    .brand p {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    /* Status Pill */
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(13, 17, 23, 0.7);
+      border: 1px solid var(--card-border);
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 6px var(--red);
+    }
+    .status-badge.online .status-dot {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .status-badge.connecting .status-dot {
+      background: var(--amber);
+      box-shadow: 0 0 8px var(--amber);
+      animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse { from { opacity: 0.3; } to { opacity: 1; } }
+
+    /* Cards & Panels */
+    .panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(10px);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .panel-title {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    /* Settings accordion */
+    details.settings-box {
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      background: rgba(13, 17, 23, 0.5);
+      overflow: hidden;
+      font-size: 0.8rem;
+    }
+    details.settings-box summary {
+      padding: 10px 14px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    details.settings-box summary:hover {
+      color: var(--text);
+    }
+    .settings-body {
+      padding: 14px;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .input-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 8px;
+    }
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .field-group label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+    input[type="text"], input[type="password"], input[type="number"], select {
+      background: #0f141c;
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Buttons */
+    button {
+      background: #21262d;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    button:hover:not(:disabled) {
+      background: #30363d;
+      border-color: #8b949e;
+      transform: translateY(-1px);
+    }
+    button:active:not(:disabled) {
+      transform: translateY(0);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    button.btn-primary {
+      background: var(--accent);
+      color: #0d1117;
+      border-color: var(--accent);
+    }
+    button.btn-primary:hover:not(:disabled) {
+      background: #34d399;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+    button.btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+    button.btn-danger:hover:not(:disabled) {
+      background: #ef4444;
+      color: #fff;
+    }
+
+    /* Relay Grid */
+    .relay-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 420px) {
+      .relay-grid { grid-template-columns: 1fr; }
+    }
+
+    .relay-card {
+      background: rgba(15, 20, 28, 0.9);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .relay-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 14px var(--accent-glow);
+    }
+    .relay-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .relay-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .relay-led {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #30363d;
+      transition: all 0.2s;
+    }
+    .relay-card.active .relay-led {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .relay-desc {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+    }
+
+    /* Toggle Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #21262d;
+      border: 1px solid var(--card-border);
+      transition: .25s;
+      border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: #8b949e;
+      transition: .25s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: var(--accent);
+      border-color: var(--accent);
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+      background-color: #0d1117;
+    }
+
+    /* Group Control Buttons */
+    .btn-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+    @media (max-width: 420px) {
+      .btn-row { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* Delay Form */
+    .delay-form {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+    .delay-form .field-group { flex: 1; min-width: 100px; }
+    .delay-form button { height: 35px; }
+
+    /* Live Terminal Log */
+    .terminal {
+      background: #090c10;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      height: 160px;
+      overflow-y: auto;
+      font-size: 0.72rem;
+      line-height: 1.5;
+    }
+    .log-line {
+      display: flex;
+      gap: 8px;
+      word-break: break-all;
+    }
+    .log-time { color: #484f58; flex-shrink: 0; }
+    .log-tag { font-weight: 700; flex-shrink: 0; width: 48px; }
+    .log-tag.SEND { color: var(--amber); }
+    .log-tag.RECV { color: #58a6ff; }
+    .log-tag.RELAY { color: var(--accent); }
+    .log-tag.SYS { color: #8b949e; }
+    .log-tag.ERR { color: var(--red); }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <div class="brand" style="flex-direction: row; align-items: center; gap: 12px;">
+      <img src="iprotek_logo.png" alt="IPROTEK Logo" style="width: 48px; height: 48px; border-radius: 12px; box-shadow: 0 0 14px rgba(253, 184, 19, 0.35);">
+      <div>
+        <h1>IPROTEK<span>·</span>MQTT</h1>
+        <p>Modbus RTU 8-Ch Relay Global Remote Controller</p>
+      </div>
+    </div>
+    <div class="status-badge" id="statusBadge">
+      <div class="status-dot"></div>
+      <span id="statusText">오프라인</span>
+    </div>
+  </header>
+
+  <!-- Broker Connection Settings -->
+  <details class="settings-box" id="settingsDetails" open>
+    <summary>
+      <span>⚙️ MQTT 브로커 연결 설정</span>
+      <span id="cfgSummary">broker.hivemq.com</span>
+    </summary>
+    <div class="settings-body">
+      <div class="input-grid">
+        <div class="field-group">
+          <label for="cfgHost">브로커 주소 (Host)</label>
+          <input type="text" id="cfgHost" value="broker.hivemq.com" placeholder="예: broker.hivemq.com">
+        </div>
+        <div class="field-group">
+          <label for="cfgPort">포트 (WS/WSS)</label>
+          <input type="number" id="cfgPort" value="8884" placeholder="8884">
+        </div>
+      </div>
+
+      <div class="input-grid">
+        <div class="field-group">
+          <label for="cfgDeviceId">Device ID (토픽 식별자)</label>
+          <input type="text" id="cfgDeviceId" value="relay8" placeholder="예: relay8">
+        </div>
+        <div class="field-group">
+          <label for="cfgPath">WS Path</label>
+          <input type="text" id="cfgPath" value="/mqtt" placeholder="/mqtt">
+        </div>
+      </div>
+
+      <div class="input-grid">
+        <div class="field-group">
+          <label for="cfgUser">사용자 이름 (선택)</label>
+          <input type="text" id="cfgUser" placeholder="HiveMQ Cloud 계정">
+        </div>
+        <div class="field-group">
+          <label for="cfgPass">비밀번호 (선택)</label>
+          <input type="password" id="cfgPass" placeholder="••••••••">
+        </div>
+      </div>
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="cfgSsl" checked>
+        <label for="cfgSsl">SSL/TLS 보안 연결 사용 (포트 8884 등 권장)</label>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 4px;">
+        <button class="btn-primary" id="btnConnect" style="flex: 2;">브로커 연결</button>
+        <button class="btn-danger" id="btnDisconnect" style="flex: 1;" disabled>연결 해제</button>
+      </div>
+      <button id="btnResetWifi" style="width: 100%; margin-top: 6px; background: rgba(245, 158, 11, 0.12); color: var(--amber); border-color: rgba(245, 158, 11, 0.35);">
+        📶 장비 Wi-Fi 재설정 포털 열기 (IPROTEK-SETUP)
+      </button>
+    </div>
+  </details>
+
+  <!-- 8-Channel Relay Grid -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">8-Channel Relays</span>
+      <span style="font-size: 0.72rem; color: var(--text-muted);" id="deviceState">기기 상태 대기 중</span>
+    </div>
+    <div class="relay-grid" id="relayGrid">
+      <!-- 8개 릴레이가 JS로 동적 렌더링됩니다 -->
+    </div>
+
+    <!-- Group Controls -->
+    <div class="btn-row">
+      <button class="btn-primary" id="btnAllOn">전체 ON</button>
+      <button class="btn-danger" id="btnAllOff">전체 OFF</button>
+      <button id="btnRevAll">전체 반전</button>
+      <button id="btnRead">상태 갱신</button>
+    </div>
+  </div>
+
+  <!-- Delay Timer Control -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">소프트웨어 딜레이 타이머</span>
+    </div>
+    <div class="delay-form">
+      <div class="field-group">
+        <label for="dlyChannel">채널 선택</label>
+        <select id="dlyChannel">
+          <option value="1">Relay 1</option>
+          <option value="2">Relay 2</option>
+          <option value="3">Relay 3</option>
+          <option value="4">Relay 4</option>
+          <option value="5">Relay 5</option>
+          <option value="6">Relay 6</option>
+          <option value="7">Relay 7</option>
+          <option value="8">Relay 8</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label for="dlySeconds">유지 시간 (초)</label>
+        <input type="number" id="dlySeconds" value="1.0" min="0.1" max="25.5" step="0.1">
+      </div>
+      <button class="btn-primary" id="btnDlySend">타이머 ON</button>
+    </div>
+  </div>
+
+  <!-- Realtime Terminal Log -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">실시간 MQTT 통신 로그</span>
+      <button id="btnClearLog" style="padding: 4px 8px; font-size: 0.68rem;">로그 지우기</button>
+    </div>
+    <div class="terminal" id="terminal"></div>
+  </div>
+
+</div>
+
+<script>
+  const RELAY_COUNT = 8;
+  let relayStates = new Array(RELAY_COUNT).fill(false);
+  let mqttClient = null;
+  let isConnected = false;
+
+  // DOM Elements
+  const statusBadge = document.getElementById('statusBadge');
+  const statusText = document.getElementById('statusText');
+  const relayGrid = document.getElementById('relayGrid');
+  const terminal = document.getElementById('terminal');
+  const deviceState = document.getElementById('deviceState');
+
+  const cfgHost = document.getElementById('cfgHost');
+  const cfgPort = document.getElementById('cfgPort');
+  const cfgPath = document.getElementById('cfgPath');
+  const cfgDeviceId = document.getElementById('cfgDeviceId');
+  const cfgUser = document.getElementById('cfgUser');
+  const cfgPass = document.getElementById('cfgPass');
+  const cfgSsl = document.getElementById('cfgSsl');
+  const cfgSummary = document.getElementById('cfgSummary');
+
+  const btnConnect = document.getElementById('btnConnect');
+  const btnDisconnect = document.getElementById('btnDisconnect');
+  const settingsDetails = document.getElementById('settingsDetails');
+
+  // 1. 설정 불러오기 및 저장 (localStorage)
+  function loadSettings() {
+    try {
+      const s = JSON.parse(localStorage.getItem('iprotek_mqtt_config') || '{}');
+      if (s.host) cfgHost.value = s.host;
+      if (s.port) cfgPort.value = s.port;
+      if (s.path) cfgPath.value = s.path;
+      if (s.deviceId) cfgDeviceId.value = s.deviceId;
+      if (s.user) cfgUser.value = s.user;
+      if (s.ssl !== undefined) cfgSsl.checked = s.ssl;
+      cfgSummary.textContent = cfgHost.value;
+    } catch(e) {}
+  }
+
+  function saveSettings() {
+    const s = {
+      host: cfgHost.value.trim(),
+      port: cfgPort.value.trim(),
+      path: cfgPath.value.trim(),
+      deviceId: cfgDeviceId.value.trim(),
+      user: cfgUser.value.trim(),
+      ssl: cfgSsl.checked
+    };
+    localStorage.setItem('iprotek_mqtt_config', JSON.stringify(s));
+    cfgSummary.textContent = s.host || 'broker.hivemq.com';
+  }
+
+  // 2. 8개 릴레이 UI 동적 생성
+  function initRelayGrid() {
+    relayGrid.innerHTML = '';
+    for (let i = 1; i <= RELAY_COUNT; i++) {
+      const card = document.createElement('div');
+      card.className = 'relay-card';
+      card.id = `relayCard_${i}`;
+      card.innerHTML = `
+        <div class="relay-info">
+          <div class="relay-title">
+            <span class="relay-led"></span>
+            <span>Relay ${i}</span>
+          </div>
+          <span class="relay-desc" id="relayDesc_${i}">OFF</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="relaySwitch_${i}" onchange="toggleRelay(${i}, this.checked)">
+          <span class="slider"></span>
+        </label>
+      `;
+      relayGrid.appendChild(card);
+    }
+  }
+
+  function updateRelayUI(index, isOn) {
+    relayStates[index - 1] = isOn;
+    const card = document.getElementById(`relayCard_${index}`);
+    const sw = document.getElementById(`relaySwitch_${index}`);
+    const desc = document.getElementById(`relayDesc_${index}`);
+    if (card && sw && desc) {
+      if (isOn) {
+        card.classList.add('active');
+        sw.checked = true;
+        desc.textContent = 'ON';
+        desc.style.color = 'var(--accent)';
+      } else {
+        card.classList.remove('active');
+        sw.checked = false;
+        desc.textContent = 'OFF';
+        desc.style.color = 'var(--text-muted)';
+      }
+    }
+  }
+
+  // 3. 터미널 로그 출력
+  function addLog(tag, msg) {
+    const t = new Date();
+    const timeStr = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`;
+    const row = document.createElement('div');
+    row.className = 'log-line';
+    row.innerHTML = `<span class="log-time">${timeStr}</span><span class="log-tag ${tag}">[${tag}]</span><span>${escapeHtml(msg)}</span>`;
+    terminal.appendChild(row);
+    while (terminal.childElementCount > 250) terminal.removeChild(terminal.firstChild);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // 4. 상태 변경
+  function setStatus(status) {
+    statusBadge.className = 'status-badge ' + status;
+    if (status === 'online') {
+      statusText.textContent = '연결됨';
+      btnConnect.disabled = true;
+      btnDisconnect.disabled = false;
+      isConnected = true;
+      settingsDetails.removeAttribute('open');
+    } else if (status === 'connecting') {
+      statusText.textContent = '연결 중...';
+      btnConnect.disabled = true;
+      btnDisconnect.disabled = false;
+    } else {
+      statusText.textContent = '오프라인';
+      btnConnect.disabled = false;
+      btnDisconnect.disabled = true;
+      isConnected = false;
+      deviceState.textContent = '연결 끊김';
+    }
+  }
+
+  // 5. MQTT 연결 및 이벤트 핸들러
+  function connectMQTT() {
+    saveSettings();
+    const host = cfgHost.value.trim();
+    const port = parseInt(cfgPort.value.trim(), 10) || 8884;
+    const path = cfgPath.value.trim() || '/mqtt';
+    const deviceId = cfgDeviceId.value.trim() || 'relay8';
+    const clientId = 'webdash_' + Math.random().toString(16).substring(2, 10);
+
+    setStatus('connecting');
+    addLog('SYS', `브로커 연결 시도: ${host}:${port}${path} (Device: ${deviceId})`);
+
+    mqttClient = new Paho.MQTT.Client(host, port, path, clientId);
+
+    mqttClient.onConnectionLost = (resp) => {
+      setStatus('offline');
+      addLog('ERR', '브로커 연결 끊김: ' + resp.errorMessage);
+    };
+
+    mqttClient.onMessageArrived = (message) => {
+      const topic = message.destinationName;
+      const payload = message.payloadString;
+      handleIncomingMessage(topic, payload);
+    };
+
+    const options = {
+      useSSL: cfgSsl.checked,
+      timeout: 5,
+      keepAliveInterval: 30,
+      cleanSession: true,
+      onSuccess: () => {
+        setStatus('online');
+        addLog('SYS', '브로커 연결 성공!');
+        
+        // 토픽 구독
+        const subBase = `iprotek/${deviceId}/`;
+        mqttClient.subscribe(subBase + 'status');
+        mqttClient.subscribe(subBase + 'status_json');
+        mqttClient.subscribe(subBase + 'log');
+        mqttClient.subscribe(subBase + 'state');
+        addLog('SYS', `토픽 구독 완료: ${subBase}#`);
+
+        // 초기 상태 요청
+        publishCommand('read');
+      },
+      onFailure: (err) => {
+        setStatus('offline');
+        addLog('ERR', '연결 실패: ' + err.errorMessage);
+      }
+    };
+
+    if (cfgUser.value.trim()) {
+      options.userName = cfgUser.value.trim();
+      options.password = cfgPass.value;
+    }
+
+    try {
+      mqttClient.connect(options);
+    } catch(e) {
+      setStatus('offline');
+      addLog('ERR', '연결 예외: ' + e.message);
+    }
+  }
+
+  function disconnectMQTT() {
+    if (mqttClient && mqttClient.isConnected()) {
+      mqttClient.disconnect();
+      addLog('SYS', '사용자에 의해 연결 해제됨');
+    }
+    setStatus('offline');
+  }
+
+  // 6. 메시지 수신 처리
+  function handleIncomingMessage(topic, payload) {
+    const deviceId = cfgDeviceId.value.trim();
+    if (topic.endsWith('/status')) {
+      // 8비트 문자열 "01000000"
+      for (let i = 0; i < RELAY_COUNT && i < payload.length; i++) {
+        updateRelayUI(i + 1, payload[i] === '1');
+      }
+      addLog('RELAY', `릴레이 상태 동기화: ${payload}`);
+    } else if (topic.endsWith('/state')) {
+      deviceState.textContent = (payload === 'online') ? '🟢 기기 접속 중' : '🔴 기기 오프라인';
+      addLog('SYS', `기기 생존 상태(LWT): ${payload}`);
+    } else if (topic.endsWith('/log')) {
+      addLog('RECV', payload);
+    } else {
+      addLog('RECV', `[${topic}] ${payload}`);
+    }
+  }
+
+  // 7. 명령 발행 (Publish)
+  function publishCommand(cmd) {
+    if (!mqttClient || !mqttClient.isConnected()) {
+      addLog('ERR', '명령 전송 실패: 브로커와 연결되어 있지 않습니다.');
+      return;
+    }
+    const deviceId = cfgDeviceId.value.trim() || 'relay8';
+    const topic = `iprotek/${deviceId}/cmd`;
+    const message = new Paho.MQTT.Message(cmd);
+    message.destinationName = topic;
+    message.qos = 1;
+    mqttClient.send(message);
+    addLog('SEND', cmd);
+  }
+
+  function toggleRelay(num, checked) {
+    updateRelayUI(num, checked);
+    publishCommand(`r${num}${checked ? '1' : '0'}`);
+  }
+
+  // 이벤트 리스너 등록
+  btnConnect.addEventListener('click', connectMQTT);
+  btnDisconnect.addEventListener('click', disconnectMQTT);
+
+  document.getElementById('btnAllOn').addEventListener('click', () => publishCommand('all1'));
+  document.getElementById('btnAllOff').addEventListener('click', () => publishCommand('all0'));
+  document.getElementById('btnRevAll').addEventListener('click', () => publishCommand('revall'));
+  document.getElementById('btnRead').addEventListener('click', () => publishCommand('read'));
+
+  document.getElementById('btnDlySend').addEventListener('click', () => {
+    const ch = document.getElementById('dlyChannel').value;
+    const sec = parseFloat(document.getElementById('dlySeconds').value || '1.0');
+    const units = Math.max(1, Math.min(255, Math.round(sec * 10)));
+    publishCommand(`dly${ch},${units}`);
+  });
+
+  document.getElementById('btnClearLog').addEventListener('click', () => {
+    terminal.innerHTML = '';
+  });
+
+  document.getElementById('btnResetWifi').addEventListener('click', () => {
+    if (confirm('장비의 Wi-Fi 설정을 초기화하고 스마트폰 설정 포털(IPROTEK-SETUP)로 재부팅하시겠습니까?')) {
+      publishCommand('resetwifi');
+      addLog('SYS', '장비 Wi-Fi 초기화 명령(resetwifi) 전송됨.');
+    }
+  });
+
+  // 초기화 실행
+  loadSettings();
+  initRelayGrid();
+  addLog('SYS', '대시보드 준비 완료. [브로커 연결] 버튼을 눌러주세요.');
+</script>
+</body>
+</html>
