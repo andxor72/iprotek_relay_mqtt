@@ -481,6 +481,41 @@
     .log-tag.RELAY { color: var(--accent); }
     .log-tag.SYS { color: #8b949e; }
     .log-tag.ERR { color: var(--red); }
+    .log-tag.ENV { color: #22d3ee; }
+    .log-tag.CFG { color: var(--amber); }
+
+    /* Environment sensor cards */
+    .env-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+    @media (max-width: 480px) {
+      .env-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .env-card {
+      background: rgba(15, 20, 28, 0.9);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 10px 8px;
+      text-align: center;
+    }
+    .env-card .env-icon { font-size: 1.1rem; }
+    .env-card .env-val {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+    .env-card .env-label {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .env-card .env-sub {
+      font-size: 0.62rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
   </style>
 </head>
 <body>
@@ -502,9 +537,38 @@
     </div>
   </header>
 
+  <!-- Environment Sensor (BME280) Top Monitor -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">🌡 Environment · BME280</span>
+      <span style="font-size: 0.72rem; color: var(--text-muted);" id="envState">센서 대기 중</span>
+    </div>
+    <div class="env-grid">
+      <div class="env-card">
+        <div class="env-icon">🌡</div>
+        <div class="env-val" id="envTemp">--.-℃</div>
+        <div class="env-label">온도 → 7번</div>
+      </div>
+      <div class="env-card">
+        <div class="env-icon">💧</div>
+        <div class="env-val" id="envHum">--.-%</div>
+        <div class="env-label">습도 → 8번</div>
+      </div>
+      <div class="env-card">
+        <div class="env-icon">🧭</div>
+        <div class="env-val" id="envPress">----hPa</div>
+        <div class="env-label">기압</div>
+      </div>
+      <div class="env-card">
+        <div class="env-icon">⛰</div>
+        <div class="env-val" id="envAlt">----m</div>
+        <div class="env-label">고도</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Broker Connection Settings -->
-  <details class="settings-box" id="settingsDetails" open>
-    <summary>
+  <details class="settings-box" id="settingsDetails" open>    <summary>
       <span>⚙️ MQTT 브로커 연결 설정</span>
       <span id="cfgSummary">broker.hivemq.com</span>
     </summary>
@@ -603,8 +667,75 @@
     </div>
   </div>
 
-  <!-- Realtime Terminal Log -->
+  <!-- Environment Auto Control (7번=온도, 8번=습도) -->
   <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">🌡 환경 자동제어 (7번·8번)</span>
+      <button id="btnSensorRead" style="padding: 4px 8px; font-size: 0.68rem;">센서 읽기</button>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:10px; font-size:0.78rem;">
+      <div style="background:rgba(15,20,28,0.6); border:1px solid var(--card-border); border-radius:8px; padding:10px 12px;">
+        <div class="checkbox-row" style="margin-bottom:8px;">
+          <input type="checkbox" id="autoTempEn">
+          <label for="autoTempEn"><b>7번 릴레이 = 온도 연동</b> (<span id="autoTempName">Relay 7</span>)</label>
+        </div>
+        <div class="input-grid">
+          <div class="field-group">
+            <label for="autoTempOn">ON 온도 (≥ ℃)</label>
+            <input type="number" id="autoTempOn" step="0.5" value="30">
+          </div>
+          <div class="field-group">
+            <label for="autoTempOff">OFF 온도 (≤ ℃)</label>
+            <input type="number" id="autoTempOff" step="0.5" value="28">
+          </div>
+        </div>
+        <div class="input-grid" style="margin-top:8px;">
+          <div class="field-group">
+            <label for="autoTempMinOn">최소 ON 유지 (초)</label>
+            <input type="number" id="autoTempMinOn" min="0" max="600" value="60">
+          </div>
+          <div class="field-group">
+            <label for="autoTempMinOff">최소 OFF 휴지 (초)</label>
+            <input type="number" id="autoTempMinOff" min="0" max="600" value="60">
+          </div>
+        </div>
+      </div>
+      <div style="background:rgba(15,20,28,0.6); border:1px solid var(--card-border); border-radius:8px; padding:10px 12px;">
+        <div class="checkbox-row" style="margin-bottom:8px;">
+          <input type="checkbox" id="autoHumEn">
+          <label for="autoHumEn"><b>8번 릴레이 = 습도 연동</b> (<span id="autoHumName">Relay 8</span>)</label>
+        </div>
+        <div class="input-grid">
+          <div class="field-group">
+            <label for="autoHumOn">ON 습도 (≥ %)</label>
+            <input type="number" id="autoHumOn" step="1" value="70">
+          </div>
+          <div class="field-group">
+            <label for="autoHumOff">OFF 습도 (≤ %)</label>
+            <input type="number" id="autoHumOff" step="1" value="60">
+          </div>
+        </div>
+        <div class="input-grid" style="margin-top:8px;">
+          <div class="field-group">
+            <label for="autoHumMinOn">최소 ON 유지 (초)</label>
+            <input type="number" id="autoHumMinOn" min="0" max="600" value="60">
+          </div>
+          <div class="field-group">
+            <label for="autoHumMinOff">최소 OFF 휴지 (초)</label>
+            <input type="number" id="autoHumMinOff" min="0" max="600" value="60">
+          </div>
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="autoSeaLevel">해면기압 기준 (고도 환산용 hPa)</label>
+        <input type="number" id="autoSeaLevel" step="0.1" value="1013.2">
+      </div>
+      <button class="btn-primary" id="btnSensorSave" style="width:100%;">자동제어 설정 장비에 저장</button>
+      <div style="font-size:0.68rem; color:var(--text-muted);">※ 안전모드: ON/OFF 뒤바뀌면 자동정렬, 갭(온도0.5℃/습도2%) 강제, 부팅 30초 안정화, 센서 3회실패시 안전OFF. 7/8번 제목은 ✏️에서 자유 변경.</div>
+    </div>
+  </div>
+
+  <!-- Realtime Terminal Log -->  <div class="panel">
     <div class="panel-header">
       <span class="panel-title">실시간 MQTT 통신 로그</span>
       <button id="btnClearLog" style="padding: 4px 8px; font-size: 0.68rem;">로그 지우기</button>
@@ -851,10 +982,13 @@
         mqttClient.subscribe(subBase + 'log');
         mqttClient.subscribe(subBase + 'state');
         mqttClient.subscribe(subBase + 'config');
+        mqttClient.subscribe(subBase + 'sensor');
+        mqttClient.subscribe(subBase + 'sensor_config');
         addLog('SYS', `토픽 구독 완료: ${subBase}#`);
 
         // 초기 상태 요청
         publishCommand('read');
+        publishCommand('sensor');
       },
       onFailure: (err) => {
         setStatus('offline');
@@ -884,8 +1018,57 @@
   }
 
   // 6. 메시지 수신 처리
+  function updateEnvUI(t, h, p, alt) {
+    if (t !== undefined && t !== null && !isNaN(t)) document.getElementById('envTemp').textContent = Number(t).toFixed(1) + '℃';
+    if (h !== undefined && h !== null && !isNaN(h)) document.getElementById('envHum').textContent = Number(h).toFixed(1) + '%';
+    if (p !== undefined && p !== null && !isNaN(p)) document.getElementById('envPress').textContent = Math.round(Number(p)) + 'hPa';
+    if (alt !== undefined && alt !== null && !isNaN(alt)) document.getElementById('envAlt').textContent = Math.round(Number(alt)) + 'm';
+    document.getElementById('envState').textContent = '업데이트 ' + new Date().toLocaleTimeString();
+  }
+
+  function applySensorConfig(d) {
+    if (d.tempEn !== undefined) document.getElementById('autoTempEn').checked = !!(d.tempEn === true || d.tempEn === 1);
+    if (d.tempOn !== undefined) document.getElementById('autoTempOn').value = d.tempOn;
+    if (d.tempOff !== undefined) document.getElementById('autoTempOff').value = d.tempOff;
+    if (d.tempMinOn !== undefined) document.getElementById('autoTempMinOn').value = d.tempMinOn;
+    if (d.tempMinOff !== undefined) document.getElementById('autoTempMinOff').value = d.tempMinOff;
+    if (d.humEn !== undefined) document.getElementById('autoHumEn').checked = !!(d.humEn === true || d.humEn === 1);
+    if (d.humOn !== undefined) document.getElementById('autoHumOn').value = d.humOn;
+    if (d.humOff !== undefined) document.getElementById('autoHumOff').value = d.humOff;
+    if (d.humMinOn !== undefined) document.getElementById('autoHumMinOn').value = d.humMinOn;
+    if (d.humMinOff !== undefined) document.getElementById('autoHumMinOff').value = d.humMinOff;
+    if (d.seaLevel !== undefined) document.getElementById('autoSeaLevel').value = d.seaLevel;
+    if (d.tempRelayName) document.getElementById('autoTempName').textContent = d.tempRelayName;
+    if (d.humRelayName) document.getElementById('autoHumName').textContent = d.humRelayName;
+    if (d.hasSensor === false) document.getElementById('envState').textContent = 'BME280 없음';
+  }
+
   function handleIncomingMessage(topic, payload) {
     const deviceId = cfgDeviceId.value.trim();
+    if (topic.endsWith('/sensor')) {
+      try {
+        const d = JSON.parse(payload);
+        updateEnvUI(d.t, d.h, d.p, d.alt);
+        addLog('ENV', `T:${d.t}℃ H:${d.h}% P:${d.p}hPa Alt:${d.alt}m`);
+      } catch(e) {}
+      return;
+    } else if (topic.endsWith('/sensor_config')) {
+      try {
+        const d = JSON.parse(payload);
+        applySensorConfig(d);
+        addLog('CFG', '환경 자동제어(7번온도/8번습도) 동기화 완료');
+      } catch(e) {}
+      return;
+    } else if (topic.endsWith('/status_json')) {
+      try {
+        const d = JSON.parse(payload);
+        if (d && d.env) updateEnvUI(d.env.t, d.env.h, d.env.p, d.env.alt);
+        if (d && d.relays) {
+          for (let i = 0; i < RELAY_COUNT && i < d.relays.length; i++) updateRelayUI(i + 1, d.relays[i] === 1);
+        }
+        return;
+      } catch(e) {}
+    }
     if (topic.endsWith('/status')) {
       // 8비트 문자열 "01000000"
       for (let i = 0; i < RELAY_COUNT && i < payload.length; i++) {
@@ -908,6 +1091,10 @@
           for (let i = 0; i < RELAY_COUNT; i++) {
             updateRelayUI(i + 1, relayStates[i]);
           }
+          const r7 = relayConfigs.find(x => x.ch === 7);
+          const r8 = relayConfigs.find(x => x.ch === 8);
+          if (r7) document.getElementById('autoTempName').textContent = r7.name;
+          if (r8) document.getElementById('autoHumName').textContent = r8.name;
           addLog('CFG', '릴레이 명칭 및 딜레이 모드 동기화 완료');
         }
       } catch(e) {
@@ -999,6 +1186,38 @@
   document.getElementById('btnAllOff').addEventListener('click', () => publishCommand('all0'));
   document.getElementById('btnRevAll').addEventListener('click', () => publishCommand('revall'));
   document.getElementById('btnRead').addEventListener('click', () => publishCommand('read'));
+  document.getElementById('btnSensorRead').addEventListener('click', () => publishCommand('sensor'));
+
+  document.getElementById('btnSensorSave').addEventListener('click', () => {
+    const deviceId = cfgDeviceId.value.trim() || 'relay8';
+    let tempOn = parseFloat(document.getElementById('autoTempOn').value);
+    let tempOff = parseFloat(document.getElementById('autoTempOff').value);
+    let humOn = parseFloat(document.getElementById('autoHumOn').value);
+    let humOff = parseFloat(document.getElementById('autoHumOff').value);
+    if (tempOff > tempOn) { const t = tempOn; tempOn = tempOff; tempOff = t; }
+    if (humOff > humOn) { const h = humOn; humOn = humOff; humOff = h; }
+    const payload = JSON.stringify({
+      tempEn: document.getElementById('autoTempEn').checked ? 1 : 0,
+      tempOn, tempOff,
+      tempMinOn: parseInt(document.getElementById('autoTempMinOn').value) || 0,
+      tempMinOff: parseInt(document.getElementById('autoTempMinOff').value) || 0,
+      humEn: document.getElementById('autoHumEn').checked ? 1 : 0,
+      humOn, humOff,
+      humMinOn: parseInt(document.getElementById('autoHumMinOn').value) || 0,
+      humMinOff: parseInt(document.getElementById('autoHumMinOff').value) || 0,
+      seaLevel: parseFloat(document.getElementById('autoSeaLevel').value) || 1013.2
+    });
+    const topic = `iprotek/${deviceId}/set_sensor_config`;
+    const msg = new Paho.MQTT.Message(payload);
+    msg.destinationName = topic;
+    msg.qos = 1;
+    if (mqttClient && mqttClient.isConnected()) {
+      mqttClient.send(msg);
+      addLog('SEND', '[자동제어 저장] 7번온도/8번습도 → ' + payload);
+    } else {
+      addLog('ERR', '브로커 미연결: 자동제어 저장 실패');
+    }
+  });
 
   document.getElementById('btnDlySend').addEventListener('click', () => {
     const ch = document.getElementById('dlyChannel').value;
