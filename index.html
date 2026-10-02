@@ -161,6 +161,8 @@
       grid-template-columns: 2fr 1fr;
       gap: 8px;
     }
+    .input-grid.eq { grid-template-columns: 1fr 1fr; }
+    .input-grid > * { min-width: 0; }
     .field-group {
       display: flex;
       flex-direction: column;
@@ -180,6 +182,8 @@
       padding: 8px 10px;
       outline: none;
       transition: border-color 0.2s;
+      min-width: 0;
+      max-width: 100%;
     }
     input:focus, select:focus {
       border-color: var(--accent);
@@ -711,7 +715,7 @@
           <input type="checkbox" id="autoTempEn">
           <label for="autoTempEn"><b>7번 릴레이 = 온도 연동</b> (<span id="autoTempName">Relay 7</span>)</label>
         </div>
-        <div class="input-grid">
+        <div class="input-grid eq">
           <div class="field-group">
             <label for="autoTempOn">ON 온도 (≥ ℃)</label>
             <input type="number" id="autoTempOn" step="0.5" value="30">
@@ -728,7 +732,7 @@
             <option value="1">난방: OFF값 이하에서 ON (히터)</option>
           </select>
         </div>
-        <div class="input-grid" style="margin-top:8px;">
+        <div class="input-grid eq" style="margin-top:8px;">
           <div class="field-group">
             <label for="autoTempMinOn">최소 ON 유지 (초)</label>
             <input type="number" id="autoTempMinOn" min="0" max="600" value="60">
@@ -748,7 +752,7 @@
           <input type="checkbox" id="autoHumEn">
           <label for="autoHumEn"><b>8번 릴레이 = 습도 연동</b> (<span id="autoHumName">Relay 8</span>)</label>
         </div>
-        <div class="input-grid">
+        <div class="input-grid eq">
           <div class="field-group">
             <label for="autoHumOn">ON 습도 (≥ %)</label>
             <input type="number" id="autoHumOn" step="1" value="70">
@@ -758,7 +762,7 @@
             <input type="number" id="autoHumOff" step="1" value="60">
           </div>
         </div>
-        <div class="input-grid" style="margin-top:8px;">
+        <div class="input-grid eq" style="margin-top:8px;">
           <div class="field-group">
             <label for="autoHumMinOn">최소 ON 유지 (초)</label>
             <input type="number" id="autoHumMinOn" min="0" max="600" value="60">
