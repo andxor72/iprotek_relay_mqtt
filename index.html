@@ -782,6 +782,10 @@
       <label for="secArmed"><b>경계 모드 (Armed)</b> <span id="secModeText" style="color:var(--text-muted);">- 해제됨: 수동 확인만</span></label>
       <button id="btnSecApply" style="padding: 4px 12px; font-size: 0.72rem; margin-left: auto;">적용</button>
     </div>
+    <div class="checkbox-row" style="margin-bottom:8px;">
+      <input type="checkbox" id="secSirenEn" checked>
+      <label for="secSirenEn">사이렌 릴레이 사용 (6번) — 해제 시 타 용도로 사용 가능</label>
+    </div>
     <div class="env-grid">
       <div class="env-card">
         <div class="env-icon">📡</div>
@@ -1159,7 +1163,7 @@
     });
   }
 
-  function updateSecStatusUI(mode, zones, radar, siren, doorOk) {
+  function updateSecStatusUI(mode, zones, radar, siren, doorOk, sirenEn) {
     const armed = (mode === 'armed');
     document.getElementById('secArmed').checked = armed;
     document.getElementById('secModeText').textContent = armed ? '- 경계중: 감시·경보 동작' : '- 해제됨: 수동 확인만';
@@ -1167,6 +1171,7 @@
     document.getElementById('secRadar').style.color = radar ? 'var(--red)' : 'var(--accent)';
     document.getElementById('secSiren').textContent = siren ? 'ON' : 'OFF';
     document.getElementById('secSiren').style.color = siren ? 'var(--red)' : 'var(--text-muted)';
+    if (sirenEn !== undefined) document.getElementById('secSirenEn').checked = !!sirenEn;
     secDoorOk = !!doorOk;
     let openCnt = 0;
     (zones || []).forEach((v, i) => {
@@ -1193,6 +1198,7 @@
       const armed = !!(d.armed === true || d.armed === 1);
       document.getElementById('secArmed').checked = armed;
     }
+    if (d.sirenEn !== undefined) document.getElementById('secSirenEn').checked = !!(d.sirenEn === true || d.sirenEn === 1);
     if (d.zones && Array.isArray(d.zones)) {
       d.zones.forEach(z => {
         const t = secZones.find(x => x.z === z.z);
@@ -1307,7 +1313,7 @@
     } else if (topic.endsWith('/security/status')) {
       try {
         const d = JSON.parse(payload);
-        updateSecStatusUI(d.mode, d.zones, d.radar === 1, d.siren === 1, d.doorOk === 1);
+        updateSecStatusUI(d.mode, d.zones, d.radar === 1, d.siren === 1, d.doorOk === 1, d.sirenEn === 1);
         markDeviceAlive();
       } catch(e) {}
       return;
@@ -1483,6 +1489,21 @@
   }
 
   document.getElementById('secArmed').addEventListener('change', publishArmedState);
+  document.getElementById('secSirenEn').addEventListener('change', () => {
+    const deviceId = cfgDeviceId.value.trim() || 'relay8';
+    const el = document.getElementById('secSirenEn');
+    const payload = JSON.stringify({ sirenEn: el.checked ? 1 : 0 });
+    const msg = new Paho.MQTT.Message(payload);
+    msg.destinationName = `iprotek/${deviceId}/set_security_config`;
+    msg.qos = 1;
+    if (mqttClient && mqttClient.isConnected()) {
+      mqttClient.send(msg);
+      addLog('SEND', el.checked ? '[사이렌 릴레이 사용]' : '[사이렌 릴레이 미사용: 6번 타용도]');
+    } else {
+      addLog('ERR', '브로커 미연결: 변경 실패');
+      el.checked = !el.checked;
+    }
+  });
   document.getElementById('btnSecApply').addEventListener('click', publishArmedState);
 
   document.getElementById('btnSecRefresh').addEventListener('click', () => publishCommand('sec'));
