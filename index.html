@@ -721,6 +721,13 @@
             <input type="number" id="autoTempOff" step="0.5" value="28">
           </div>
         </div>
+        <div class="field-group" style="margin-top:8px;">
+          <label for="autoTempMode">온도 동작 방향</label>
+          <select id="autoTempMode">
+            <option value="0">냉방: ON값 이상에서 ON (환풍기)</option>
+            <option value="1">난방: OFF값 이하에서 ON (히터)</option>
+          </select>
+        </div>
         <div class="input-grid" style="margin-top:8px;">
           <div class="field-group">
             <label for="autoTempMinOn">최소 ON 유지 (초)</label>
@@ -1279,6 +1286,7 @@
     if (d.tempEn !== undefined) document.getElementById('autoTempEn').checked = !!(d.tempEn === true || d.tempEn === 1);
     if (d.tempOn !== undefined) document.getElementById('autoTempOn').value = d.tempOn;
     if (d.tempOff !== undefined) document.getElementById('autoTempOff').value = d.tempOff;
+    if (d.tempMode !== undefined) document.getElementById('autoTempMode').value = d.tempMode;
     if (d.tempMinOn !== undefined) document.getElementById('autoTempMinOn').value = d.tempMinOn;
     if (d.tempMinOff !== undefined) document.getElementById('autoTempMinOff').value = d.tempMinOff;
     if (d.tempCal !== undefined) document.getElementById('autoTempCal').value = d.tempCal;
@@ -1529,6 +1537,7 @@
     const payload = JSON.stringify({
       tempEn: document.getElementById('autoTempEn').checked ? 1 : 0,
       tempOn, tempOff,
+      tempMode: parseInt(document.getElementById('autoTempMode').value) || 0,
       tempMinOn: parseInt(document.getElementById('autoTempMinOn').value) || 0,
       tempMinOff: parseInt(document.getElementById('autoTempMinOff').value) || 0,
       tempCal: parseFloat(document.getElementById('autoTempCal').value) || 0,
