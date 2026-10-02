@@ -1171,8 +1171,7 @@
     document.getElementById('secRadar').style.color = radar ? 'var(--red)' : 'var(--accent)';
     document.getElementById('secSiren').textContent = siren ? 'ON' : 'OFF';
     document.getElementById('secSiren').style.color = siren ? 'var(--red)' : 'var(--text-muted)';
-    if (sirenEn !== undefined) document.getElementById('secSirenEn').checked = !!sirenEn;
-    secDoorOk = !!doorOk;
+    if (sirenEn !== undefined) document.getElementById('secSirenEn').checked = !!sirenEn;    secDoorOk = !!doorOk;
     let openCnt = 0;
     (zones || []).forEach((v, i) => {
       const el = document.getElementById(`zone_${i + 1}`);
@@ -1313,7 +1312,7 @@
     } else if (topic.endsWith('/security/status')) {
       try {
         const d = JSON.parse(payload);
-        updateSecStatusUI(d.mode, d.zones, d.radar === 1, d.siren === 1, d.doorOk === 1, d.sirenEn === 1);
+        updateSecStatusUI(d.mode, d.zones, d.radar === 1, d.siren === 1, d.doorOk === 1, d.sirenEn === undefined ? undefined : d.sirenEn === 1);
         markDeviceAlive();
       } catch(e) {}
       return;
