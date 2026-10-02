@@ -717,11 +717,11 @@
         </div>
         <div class="input-grid eq">
           <div class="field-group">
-            <label for="autoTempOn">ON 온도 (≥ ℃)</label>
+            <label for="autoTempOn" id="autoTempOnLabel">ON 온도 (≥ ℃)</label>
             <input type="number" id="autoTempOn" step="0.5" value="30">
           </div>
           <div class="field-group">
-            <label for="autoTempOff">OFF 온도 (≤ ℃)</label>
+            <label for="autoTempOff" id="autoTempOffLabel">OFF 온도 (≤ ℃)</label>
             <input type="number" id="autoTempOff" step="0.5" value="28">
           </div>
         </div>
@@ -1290,7 +1290,10 @@
     if (d.tempEn !== undefined) document.getElementById('autoTempEn').checked = !!(d.tempEn === true || d.tempEn === 1);
     if (d.tempOn !== undefined) document.getElementById('autoTempOn').value = d.tempOn;
     if (d.tempOff !== undefined) document.getElementById('autoTempOff').value = d.tempOff;
-    if (d.tempMode !== undefined) document.getElementById('autoTempMode').value = d.tempMode;
+    if (d.tempMode !== undefined) {
+      document.getElementById('autoTempMode').value = d.tempMode;
+      updateTempLabels();
+    }
     if (d.tempMinOn !== undefined) document.getElementById('autoTempMinOn').value = d.tempMinOn;
     if (d.tempMinOff !== undefined) document.getElementById('autoTempMinOff').value = d.tempMinOff;
     if (d.tempCal !== undefined) document.getElementById('autoTempCal').value = d.tempCal;
@@ -1530,13 +1533,21 @@
     document.getElementById('secArmed').dispatchEvent(new Event('change'));
   });
 
+  function updateTempLabels() {
+    const heat = document.getElementById('autoTempMode').value === '1';
+    document.getElementById('autoTempOnLabel').textContent = heat ? 'ON 온도 (≤ ℃)' : 'ON 온도 (≥ ℃)';
+    document.getElementById('autoTempOffLabel').textContent = heat ? 'OFF 온도 (≥ ℃)' : 'OFF 온도 (≤ ℃)';
+  }
+  document.getElementById('autoTempMode').addEventListener('change', updateTempLabels);
   document.getElementById('btnSensorSave').addEventListener('click', () => {
     const deviceId = cfgDeviceId.value.trim() || 'relay8';
     let tempOn = parseFloat(document.getElementById('autoTempOn').value);
     let tempOff = parseFloat(document.getElementById('autoTempOff').value);
     let humOn = parseFloat(document.getElementById('autoHumOn').value);
     let humOff = parseFloat(document.getElementById('autoHumOff').value);
-    if (tempOff > tempOn) { const t = tempOn; tempOn = tempOff; tempOff = t; }
+    const tempModeSel = parseInt(document.getElementById('autoTempMode').value) || 0;
+    if (tempModeSel === 1) { if (tempOn > tempOff) { const t = tempOn; tempOn = tempOff; tempOff = t; } }
+    else { if (tempOff > tempOn) { const t = tempOn; tempOn = tempOff; tempOff = t; } }
     if (humOff > humOn) { const h = humOn; humOn = humOff; humOff = h; }
     const payload = JSON.stringify({
       tempEn: document.getElementById('autoTempEn').checked ? 1 : 0,
@@ -1584,6 +1595,7 @@
   // 초기화 실행
   loadSettings();
   initRelayGrid();
+  updateTempLabels();
   initDoorGrid();
   renderCamLinks();
   addLog('SYS', '대시보드 준비 완료. [브로커 연결] 버튼을 눌러주세요.');
