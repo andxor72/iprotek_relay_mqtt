@@ -699,6 +699,10 @@
             <input type="number" id="autoTempMinOff" min="0" max="600" value="60">
           </div>
         </div>
+        <div class="field-group" style="margin-top:8px;">
+          <label for="autoTempCal">온도 보정 (℃, 자가발열 오프셋)</label>
+          <input type="number" id="autoTempCal" step="0.5" min="-10" max="10" value="0">
+        </div>
       </div>
       <div style="background:rgba(15,20,28,0.6); border:1px solid var(--card-border); border-radius:8px; padding:10px 12px;">
         <div class="checkbox-row" style="margin-bottom:8px;">
@@ -942,8 +946,27 @@
   }
 
   // 5. MQTT 연결 및 이벤트 핸들러
+  let intentionalDisconnect = false;
+  let reconnectTimer = null;
+
+  function scheduleReconnect() {
+    if (intentionalDisconnect || reconnectTimer) return;
+    addLog('SYS', '브로커 연결이 끊겨 5초 후 자동 재연결합니다');
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!isConnected && !intentionalDisconnect) connectMQTT();
+    }, 5000);
+  }
+
+  function markDeviceAlive() {
+    // 데이터가 흐르면 기기는 살아있는 것 (오래된 retained offline 보정)
+    deviceState.textContent = '🟢 기기 접속 중';
+  }
+
   function connectMQTT() {
     saveSettings();
+    intentionalDisconnect = false;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     const host = cfgHost.value.trim();
     const port = parseInt(cfgPort.value.trim(), 10) || 8884;
     const path = cfgPath.value.trim() || '/mqtt';
@@ -958,6 +981,7 @@
     mqttClient.onConnectionLost = (resp) => {
       setStatus('offline');
       addLog('ERR', '브로커 연결 끊김: ' + resp.errorMessage);
+      scheduleReconnect();
     };
 
     mqttClient.onMessageArrived = (message) => {
@@ -993,6 +1017,7 @@
       onFailure: (err) => {
         setStatus('offline');
         addLog('ERR', '연결 실패: ' + err.errorMessage);
+        scheduleReconnect();
       }
     };
 
@@ -1010,6 +1035,8 @@
   }
 
   function disconnectMQTT() {
+    intentionalDisconnect = true;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (mqttClient && mqttClient.isConnected()) {
       mqttClient.disconnect();
       addLog('SYS', '사용자에 의해 연결 해제됨');
@@ -1018,12 +1045,13 @@
   }
 
   // 6. 메시지 수신 처리
+  let sensorModel = '';
   function updateEnvUI(t, h, p, alt) {
     if (t !== undefined && t !== null && !isNaN(t)) document.getElementById('envTemp').textContent = Number(t).toFixed(1) + '℃';
     if (h !== undefined && h !== null && !isNaN(h)) document.getElementById('envHum').textContent = Number(h).toFixed(1) + '%';
     if (p !== undefined && p !== null && !isNaN(p)) document.getElementById('envPress').textContent = Math.round(Number(p)) + 'hPa';
     if (alt !== undefined && alt !== null && !isNaN(alt)) document.getElementById('envAlt').textContent = Math.round(Number(alt)) + 'm';
-    document.getElementById('envState').textContent = '업데이트 ' + new Date().toLocaleTimeString();
+    document.getElementById('envState').textContent = (sensorModel ? sensorModel + ' · ' : '') + '업데이트 ' + new Date().toLocaleTimeString();
   }
 
   function applySensorConfig(d) {
@@ -1032,6 +1060,7 @@
     if (d.tempOff !== undefined) document.getElementById('autoTempOff').value = d.tempOff;
     if (d.tempMinOn !== undefined) document.getElementById('autoTempMinOn').value = d.tempMinOn;
     if (d.tempMinOff !== undefined) document.getElementById('autoTempMinOff').value = d.tempMinOff;
+    if (d.tempCal !== undefined) document.getElementById('autoTempCal').value = d.tempCal;
     if (d.humEn !== undefined) document.getElementById('autoHumEn').checked = !!(d.humEn === true || d.humEn === 1);
     if (d.humOn !== undefined) document.getElementById('autoHumOn').value = d.humOn;
     if (d.humOff !== undefined) document.getElementById('autoHumOff').value = d.humOff;
@@ -1040,6 +1069,13 @@
     if (d.seaLevel !== undefined) document.getElementById('autoSeaLevel').value = d.seaLevel;
     if (d.tempRelayName) document.getElementById('autoTempName').textContent = d.tempRelayName;
     if (d.humRelayName) document.getElementById('autoHumName').textContent = d.humRelayName;
+    if (d.model) {
+      sensorModel = d.model;
+      if (d.hasHum === false) {
+        document.getElementById('envHum').textContent = '--.-%';
+        addLog('SYS', '습도 미지원 모듈(' + d.model + '): 8번 습도 자동제어 비활성');
+      }
+    }
     if (d.hasSensor === false) document.getElementById('envState').textContent = 'BME280 없음';
   }
 
@@ -1049,6 +1085,7 @@
       try {
         const d = JSON.parse(payload);
         updateEnvUI(d.t, d.h, d.p, d.alt);
+        markDeviceAlive();
         addLog('ENV', `T:${d.t}℃ H:${d.h}% P:${d.p}hPa Alt:${d.alt}m`);
       } catch(e) {}
       return;
@@ -1066,6 +1103,7 @@
         if (d && d.relays) {
           for (let i = 0; i < RELAY_COUNT && i < d.relays.length; i++) updateRelayUI(i + 1, d.relays[i] === 1);
         }
+        markDeviceAlive();
         return;
       } catch(e) {}
     }
@@ -1074,6 +1112,7 @@
       for (let i = 0; i < RELAY_COUNT && i < payload.length; i++) {
         updateRelayUI(i + 1, payload[i] === '1');
       }
+      markDeviceAlive();
       addLog('RELAY', `릴레이 상태 동기화: ${payload}`);
     } else if (topic.endsWith('/config')) {
       try {
@@ -1201,6 +1240,7 @@
       tempOn, tempOff,
       tempMinOn: parseInt(document.getElementById('autoTempMinOn').value) || 0,
       tempMinOff: parseInt(document.getElementById('autoTempMinOff').value) || 0,
+      tempCal: parseFloat(document.getElementById('autoTempCal').value) || 0,
       humEn: document.getElementById('autoHumEn').checked ? 1 : 0,
       humOn, humOff,
       humMinOn: parseInt(document.getElementById('autoHumMinOn').value) || 0,
