@@ -516,6 +516,38 @@
       color: var(--text-muted);
       margin-top: 2px;
     }
+
+    /* Security zone grid + CCTV links */
+    .zone-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+    @media (max-width: 480px) {
+      .zone-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .zone {
+      background: rgba(15, 20, 28, 0.9);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px 6px;
+      text-align: center;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .zone small { display: block; font-size: 0.62rem; color: var(--text-muted); font-weight: 500; }
+    .zone.closed { border-color: var(--accent); }
+    .zone.open { border-color: var(--red); background: rgba(239, 68, 68, 0.15); color: #f87171; }
+    .zone.na { opacity: 0.45; }
+    .cam-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .cam-btn { font-size: 0.72rem; }
+    .cam-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .alert-flash {
+      animation: alertblink 0.6s infinite alternate;
+      border-color: var(--red) !important;
+    }
+    @keyframes alertblink { from { box-shadow: none; } to { box-shadow: 0 0 16px rgba(239,68,68,0.7); } }
   </style>
 </head>
 <body>
@@ -736,6 +768,58 @@
       </div>
       <button class="btn-primary" id="btnSensorSave" style="width:100%;">자동제어 설정 장비에 저장</button>
       <div style="font-size:0.68rem; color:var(--text-muted);">※ 안전모드: ON/OFF 뒤바뀌면 자동정렬, 갭(온도0.5℃/습도2%) 강제, 부팅 30초 안정화, 센서 3회실패시 안전OFF. 7/8번 제목은 ✏️에서 자유 변경.</div>
+    </div>
+  </div>
+
+  <!-- Security (v2.0: LD2402 radar + doors, CCTV ready) -->
+  <div class="panel" id="secPanel">
+    <div class="panel-header">
+      <span class="panel-title">🛡 방범 모드</span>
+      <button id="btnSecRefresh" style="padding: 4px 8px; font-size: 0.68rem;">상태 확인</button>
+    </div>
+    <div class="checkbox-row" style="margin-bottom:8px;">
+      <input type="checkbox" id="secArmed">
+      <label for="secArmed"><b>경계 모드 (Armed)</b> <span id="secModeText" style="color:var(--text-muted);">- 해제됨: 수동 확인만</span></label>
+      <button id="btnSecApply" style="padding: 4px 12px; font-size: 0.72rem; margin-left: auto;">적용</button>
+    </div>
+    <div class="env-grid">
+      <div class="env-card">
+        <div class="env-icon">📡</div>
+        <div class="env-val" id="secRadar">--</div>
+        <div class="env-label">레이더 재실</div>
+      </div>
+      <div class="env-card">
+        <div class="env-icon">🚨</div>
+        <div class="env-val" id="secSiren">--</div>
+        <div class="env-label">사이렌 (6번)</div>
+      </div>
+      <div class="env-card">
+        <div class="env-icon">🚪</div>
+        <div class="env-val" id="secDoors">--</div>
+        <div class="env-label">도어 8존</div>
+      </div>
+      <div class="env-card">
+        <div class="env-icon">🔇</div>
+        <div class="env-val" style="font-size:0.8rem;"><input type="checkbox" id="secMute"> 음소거</div>
+        <div class="env-label">경보음 설정</div>
+      </div>
+    </div>
+    <div class="zone-grid" id="doorGrid"></div>
+    <div style="font-size:0.68rem; color:var(--text-muted); margin-top:8px;">CCTV (카메라 준비 후 URL 설정 시 활성화)</div>
+    <div class="cam-row" id="camLinks"></div>
+  </div>
+
+  <!-- Security alert popup -->
+  <div class="modal-overlay" id="secAlertModal">
+    <div class="modal-card alert-flash">
+      <div class="modal-title"><span>🚨 침입 경보</span></div>
+      <div id="secAlertText" style="font-size:0.85rem; margin-bottom:6px;">-</div>
+      <div id="secAlertCam" style="font-size:0.75rem; color:var(--text-muted);"></div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="btnAlertOk">확인</button>
+        <button class="modal-btn" id="btnAlertCam" style="display:none;">CCTV 보기</button>
+        <button class="modal-btn primary" id="btnAlertDisarm">경계 해제</button>
+      </div>
     </div>
   </div>
 
@@ -1008,6 +1092,9 @@
         mqttClient.subscribe(subBase + 'config');
         mqttClient.subscribe(subBase + 'sensor');
         mqttClient.subscribe(subBase + 'sensor_config');
+        mqttClient.subscribe(subBase + 'security/alert');
+        mqttClient.subscribe(subBase + 'security/status');
+        mqttClient.subscribe(subBase + 'security/config');
         addLog('SYS', `토픽 구독 완료: ${subBase}#`);
 
         // 초기 상태 요청
@@ -1054,6 +1141,135 @@
     document.getElementById('envState').textContent = (sensorModel ? sensorModel + ' · ' : '') + '업데이트 ' + new Date().toLocaleTimeString();
   }
 
+  // ---- v2.0 Security ----
+  let secZones = [];
+  for (let i = 1; i <= 8; i++) secZones.push({ z: i, name: `도어 ${i}`, type: 0, cam: '' });
+  let secDoorOk = false;
+  let secAlertCamUrl = '';
+
+  function initDoorGrid() {
+    const g = document.getElementById('doorGrid');
+    g.innerHTML = '';
+    secZones.forEach(z => {
+      const d = document.createElement('div');
+      d.className = 'zone na';
+      d.id = `zone_${z.z}`;
+      d.innerHTML = `${z.z}번<small>${escapeHtml(z.name)}</small><span>미장착</span>`;
+      g.appendChild(d);
+    });
+  }
+
+  function updateSecStatusUI(mode, zones, radar, siren, doorOk) {
+    const armed = (mode === 'armed');
+    document.getElementById('secArmed').checked = armed;
+    document.getElementById('secModeText').textContent = armed ? '- 경계중: 감시·경보 동작' : '- 해제됨: 수동 확인만';
+    document.getElementById('secRadar').textContent = radar ? '재실' : '없음';
+    document.getElementById('secRadar').style.color = radar ? 'var(--red)' : 'var(--accent)';
+    document.getElementById('secSiren').textContent = siren ? 'ON' : 'OFF';
+    document.getElementById('secSiren').style.color = siren ? 'var(--red)' : 'var(--text-muted)';
+    secDoorOk = !!doorOk;
+    let openCnt = 0;
+    (zones || []).forEach((v, i) => {
+      const el = document.getElementById(`zone_${i + 1}`);
+      if (!el) return;
+      const cfg = secZones[i] || { name: `도어 ${i + 1}` };
+      if (!secDoorOk) {
+        el.className = 'zone na';
+        el.innerHTML = `${i + 1}번<small>${escapeHtml(cfg.name)}</small><span>미장착</span>`;
+      } else if (v === 1) {
+        openCnt++;
+        el.className = 'zone open';
+        el.innerHTML = `${i + 1}번<small>${escapeHtml(cfg.name)}</small><span>열림</span>`;
+      } else {
+        el.className = 'zone closed';
+        el.innerHTML = `${i + 1}번<small>${escapeHtml(cfg.name)}</small><span>닫힘</span>`;
+      }
+    });
+    document.getElementById('secDoors').textContent = secDoorOk ? (openCnt ? openCnt + '곳 열림' : '전체 닫힘') : 'IC 없음';
+  }
+
+  function applySecConfig(d) {
+    if (d.armed !== undefined) {
+      const armed = !!(d.armed === true || d.armed === 1);
+      document.getElementById('secArmed').checked = armed;
+    }
+    if (d.zones && Array.isArray(d.zones)) {
+      d.zones.forEach(z => {
+        const t = secZones.find(x => x.z === z.z);
+        if (t) {
+          if (z.name) t.name = z.name;
+          if (z.type !== undefined) t.type = z.type;
+          if (z.cam !== undefined) t.cam = z.cam;
+        }
+      });
+      renderCamLinks();
+    }
+    if (d.sirenRelay) {
+      const labels = document.querySelectorAll('#secPanel .env-label');
+      if (labels[1]) labels[1].textContent = `사이렌 (${d.sirenRelay}번)`;
+    }
+  }
+
+  function renderCamLinks() {
+    const row = document.getElementById('camLinks');
+    row.innerHTML = '';
+    let any = false;
+    secZones.forEach(z => {
+      if (z.cam && z.cam.trim()) {
+        any = true;
+        const b = document.createElement('button');
+        b.className = 'cam-btn';
+        b.textContent = `📷 ${z.name} CCTV`;
+        b.onclick = () => window.open(z.cam, '_blank', 'width=800,height=600');
+        row.appendChild(b);
+      }
+    });
+    if (!any) {
+      const b = document.createElement('button');
+      b.className = 'cam-btn';
+      b.textContent = 'CCTV 준비중 (URL 미설정)';
+      b.disabled = true;
+      row.appendChild(b);
+    }
+  }
+
+  function secBeep(freq, ms, times) {
+    if (document.getElementById('secMute').checked) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      let t = ctx.currentTime;
+      for (let i = 0; i < (times || 1); i++) {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'square';
+        o.frequency.value = freq;
+        o.connect(g); g.connect(ctx.destination);
+        o.start(t); o.stop(t + ms / 1000);
+        t += ms / 1000 + 0.15;
+      }
+    } catch(e) {}
+  }
+
+  function showSecAlert(alert) {
+    const name = alert.name || `존 ${alert.zone}`;
+    const src = alert.src === 'radar' ? '레이더' : `도어 ${alert.zone}번`;
+    document.getElementById('secAlertText').textContent = `${src} 감지: ${name}`;
+    const z = secZones.find(x => x.z === alert.zone);
+    secAlertCamUrl = (z && z.cam) ? z.cam : '';
+    const camEl = document.getElementById('secAlertCam');
+    const camBtn = document.getElementById('btnAlertCam');
+    if (secAlertCamUrl) {
+      camEl.textContent = 'CCTV: ' + secAlertCamUrl;
+      camBtn.style.display = '';
+    } else {
+      camEl.textContent = 'CCTV 미설정 (카메라 준비 후 연동)';
+      camBtn.style.display = 'none';
+    }
+    document.getElementById('secAlertModal').classList.add('open');
+    secBeep(880, 200, 3);
+    markDeviceAlive();
+  }
+
   function applySensorConfig(d) {
     if (d.tempEn !== undefined) document.getElementById('autoTempEn').checked = !!(d.tempEn === true || d.tempEn === 1);
     if (d.tempOn !== undefined) document.getElementById('autoTempOn').value = d.tempOn;
@@ -1081,6 +1297,28 @@
 
   function handleIncomingMessage(topic, payload) {
     const deviceId = cfgDeviceId.value.trim();
+    if (topic.endsWith('/security/alert')) {
+      try {
+        const d = JSON.parse(payload);
+        showSecAlert(d);
+        addLog('RELAY', `침입 경보: ${d.src} ${d.name || ''}`);
+      } catch(e) {}
+      return;
+    } else if (topic.endsWith('/security/status')) {
+      try {
+        const d = JSON.parse(payload);
+        updateSecStatusUI(d.mode, d.zones, d.radar === 1, d.siren === 1, d.doorOk === 1);
+        markDeviceAlive();
+      } catch(e) {}
+      return;
+    } else if (topic.endsWith('/security/config')) {
+      try {
+        const d = JSON.parse(payload);
+        applySecConfig(d);
+        addLog('CFG', '방범 설정(존·카메라) 동기화 완료');
+      } catch(e) {}
+      return;
+    }
     if (topic.endsWith('/sensor')) {
       try {
         const d = JSON.parse(payload);
@@ -1227,6 +1465,39 @@
   document.getElementById('btnRead').addEventListener('click', () => publishCommand('read'));
   document.getElementById('btnSensorRead').addEventListener('click', () => publishCommand('sensor'));
 
+  // ---- Security events ----
+  function publishArmedState() {
+    const deviceId = cfgDeviceId.value.trim() || 'relay8';
+    const el = document.getElementById('secArmed');
+    const payload = JSON.stringify({ armed: el.checked ? 1 : 0 });
+    const msg = new Paho.MQTT.Message(payload);
+    msg.destinationName = `iprotek/${deviceId}/set_security_config`;
+    msg.qos = 1;
+    if (mqttClient && mqttClient.isConnected()) {
+      mqttClient.send(msg);
+      addLog('SEND', el.checked ? '[경계 모드 ON]' : '[경계 모드 OFF]');
+    } else {
+      addLog('ERR', '브로커 미연결: 모드 변경 실패');
+      el.checked = !el.checked;
+    }
+  }
+
+  document.getElementById('secArmed').addEventListener('change', publishArmedState);
+  document.getElementById('btnSecApply').addEventListener('click', publishArmedState);
+
+  document.getElementById('btnSecRefresh').addEventListener('click', () => publishCommand('sec'));
+  document.getElementById('btnAlertOk').addEventListener('click', () => {
+    document.getElementById('secAlertModal').classList.remove('open');
+  });
+  document.getElementById('btnAlertCam').addEventListener('click', () => {
+    if (secAlertCamUrl) window.open(secAlertCamUrl, '_blank', 'width=800,height=600');
+  });
+  document.getElementById('btnAlertDisarm').addEventListener('click', () => {
+    document.getElementById('secAlertModal').classList.remove('open');
+    document.getElementById('secArmed').checked = false;
+    document.getElementById('secArmed').dispatchEvent(new Event('change'));
+  });
+
   document.getElementById('btnSensorSave').addEventListener('click', () => {
     const deviceId = cfgDeviceId.value.trim() || 'relay8';
     let tempOn = parseFloat(document.getElementById('autoTempOn').value);
@@ -1280,6 +1551,8 @@
   // 초기화 실행
   loadSettings();
   initRelayGrid();
+  initDoorGrid();
+  renderCamLinks();
   addLog('SYS', '대시보드 준비 완료. [브로커 연결] 버튼을 눌러주세요.');
 </script>
 </body>
