@@ -576,26 +576,26 @@
   <!-- Environment Sensor (BME280) Top Monitor -->
   <div class="panel">
     <div class="panel-header">
-      <span class="panel-title">🌡 Environment · BME280</span>
+      <span class="panel-title">🌡 Environment · SHT30 (원격)</span>
       <span style="font-size: 0.72rem; color: var(--text-muted);" id="envState">센서 대기 중</span>
     </div>
-    <div class="env-grid">
+    <div class="env-grid" style="grid-template-columns: 1fr 1fr;">
       <div class="env-card">
         <div class="env-icon">🌡</div>
         <div class="env-val" id="envTemp">--.-℃</div>
-        <div class="env-label">온도 → 7번</div>
+        <div class="env-label">온도 (SHT)</div>
       </div>
       <div class="env-card">
         <div class="env-icon">💧</div>
         <div class="env-val" id="envHum">--.-%</div>
-        <div class="env-label">습도 → 8번</div>
+        <div class="env-label">습도 (SHT)</div>
       </div>
-      <div class="env-card">
+      <div class="env-card" style="display:none;">
         <div class="env-icon">🧭</div>
         <div class="env-val" id="envPress">----hPa</div>
         <div class="env-label">기압</div>
       </div>
-      <div class="env-card">
+      <div class="env-card" style="display:none;">
         <div class="env-icon">⛰</div>
         <div class="env-val" id="envAlt">----m</div>
         <div class="env-label">고도</div>
@@ -674,6 +674,15 @@
       <button id="btnRevAll">전체 반전</button>
       <button id="btnRead">상태 갱신</button>
     </div>
+  </div>
+
+  <!-- v2.1 Multi-module panels (1번 모듈은 위 패널, 2번부터 동적 생성) -->
+  <div class="panel" id="modPanelWrap" style="display:none;">
+    <div class="panel-header">
+      <span class="panel-title">확장 릴레이 모듈</span>
+      <button id="btnMbuscan" style="padding: 4px 8px; font-size: 0.68rem;">모듈 스캔</button>
+    </div>
+    <div id="modPanels" style="display:flex; flex-direction:column; gap:12px;"></div>
   </div>
 
   <!-- Delay Timer Control -->
@@ -1106,10 +1115,13 @@
         mqttClient.subscribe(subBase + 'state');
         mqttClient.subscribe(subBase + 'config');
         mqttClient.subscribe(subBase + 'sensor');
+        mqttClient.subscribe(subBase + 'sht');
         mqttClient.subscribe(subBase + 'sensor_config');
         mqttClient.subscribe(subBase + 'security/alert');
         mqttClient.subscribe(subBase + 'security/status');
         mqttClient.subscribe(subBase + 'security/config');
+        mqttClient.subscribe(subBase + 'modules');
+        mqttClient.subscribe(subBase + 'relay+/status');
         addLog('SYS', `토픽 구독 완료: ${subBase}#`);
 
         // 초기 상태 요청
@@ -1317,6 +1329,21 @@
 
   function handleIncomingMessage(topic, payload) {
     const deviceId = cfgDeviceId.value.trim();
+    // v2.1 모듈별 상태 (relay<N>/status) — 기존 /status 분기보다 먼저 처리
+    let mRelay = topic.match(/\/relay(\d+)\/status$/);
+    if (mRelay) {
+      const modN = parseInt(mRelay[1], 10);
+      updateModUI(modN, payload);
+      markDeviceAlive();
+      return;
+    }
+    if (topic.endsWith('/modules')) {
+      try {
+        const d = JSON.parse(payload);
+        if (d && d.modules) renderModPanels(d.modules);
+      } catch(e) {}
+      return;
+    }
     if (topic.endsWith('/security/alert')) {
       try {
         const d = JSON.parse(payload);
@@ -1336,6 +1363,16 @@
         const d = JSON.parse(payload);
         applySecConfig(d);
         addLog('CFG', '방범 설정(존·카메라) 동기화 완료');
+      } catch(e) {}
+      return;
+    }
+    if (topic.endsWith('/sht')) {
+      try {
+        const d = JSON.parse(payload);
+        updateEnvUI(d.t, d.h, null, null);
+        document.getElementById('envState').textContent = `SHT${d.sid} · 업데이트 ` + new Date().toLocaleTimeString();
+        markDeviceAlive();
+        addLog('ENV', `SHT${d.sid} T:${d.t}℃ H:${d.h}%`);
       } catch(e) {}
       return;
     }
@@ -1427,6 +1464,87 @@
     publishCommand(`r${num}${checked ? '1' : '0'}`);
   }
 
+  // ---- v2.1 Multi-module ----
+  let modList = []; // [{n, sid, ch}]
+  let modStates = {}; // n -> bool[]
+
+  function modPublish(modN, cmd) {
+    if (!mqttClient || !mqttClient.isConnected()) {
+      addLog('ERR', '명령 전송 실패: 브로커와 연결되어 있지 않습니다.');
+      return;
+    }
+    const deviceId = cfgDeviceId.value.trim() || 'relay8';
+    const message = new Paho.MQTT.Message(cmd);
+    message.destinationName = `iprotek/${deviceId}/relay${modN}/cmd`;
+    message.qos = 1;
+    mqttClient.send(message);
+    addLog('SEND', `[M${modN}] ${cmd}`);
+  }
+
+  function renderModPanels(modules) {
+    modList = modules || [];
+    const wrap = document.getElementById('modPanelWrap');
+    const box = document.getElementById('modPanels');
+    box.innerHTML = '';
+    // 1번 모듈은 상단 기본 패널이 담당, 2번부터 동적 생성
+    const extras = modList.filter(m => m.n > 1);
+    wrap.style.display = extras.length ? '' : 'none';
+    extras.forEach(m => {
+      const sec = document.createElement('div');
+      sec.style.cssText = 'background:rgba(15,20,28,0.6); border:1px solid var(--card-border); border-radius:8px; padding:10px 12px;';
+      let cards = '';
+      for (let i = 1; i <= m.ch; i++) {
+        cards += `
+          <div class="relay-card" id="mod${m.n}card_${i}">
+            <div class="relay-info">
+              <div class="relay-title"><span class="relay-led"></span><span>M${m.n}-R${i}</span></div>
+              <span class="relay-desc" id="mod${m.n}desc_${i}">OFF</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="mod${m.n}sw_${i}" onchange="toggleModRelay(${m.n}, ${i}, this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>`;
+      }
+      sec.innerHTML = `
+        <div class="panel-header" style="margin-bottom:8px;">
+          <span class="panel-title">M${m.n} · SID:${m.sid} · ${m.ch}ch</span>
+          <span>
+            <button style="padding:4px 8px; font-size:0.68rem;" onclick="modPublish(${m.n}, 'all1')">전체 ON</button>
+            <button style="padding:4px 8px; font-size:0.68rem;" onclick="modPublish(${m.n}, 'all0')">전체 OFF</button>
+          </span>
+        </div>
+        <div class="relay-grid">${cards}</div>`;
+      box.appendChild(sec);
+      modStates[m.n] = new Array(m.ch).fill(false);
+    });
+    if (extras.length) addLog('SYS', `확장 모듈 ${extras.length}개 표시 (M2~)`);
+  }
+
+  function updateModUI(modN, binStr) {
+    const m = modList.find(x => x.n === modN);
+    if (!m) return;
+    for (let i = 0; i < m.ch && i < binStr.length; i++) {
+      const isOn = binStr[i] === '1';
+      modStates[modN][i] = isOn;
+      const card = document.getElementById(`mod${modN}card_${i + 1}`);
+      const sw = document.getElementById(`mod${modN}sw_${i + 1}`);
+      const desc = document.getElementById(`mod${modN}desc_${i + 1}`);
+      if (card) card.classList.toggle('active', isOn);
+      if (sw) sw.checked = isOn;
+      if (desc) { desc.textContent = isOn ? 'ON' : 'OFF'; desc.style.color = isOn ? 'var(--accent)' : 'var(--text-muted)'; }
+    }
+  }
+
+  function toggleModRelay(modN, num, checked) {
+    const m = modList.find(x => x.n === modN);
+    const ch = m ? m.ch : 8;
+    if (!modStates[modN] || modStates[modN].length !== ch) modStates[modN] = new Array(ch).fill(false);
+    modStates[modN][num - 1] = checked;
+    updateModUI(modN, modStates[modN].map(v => v ? '1' : '0').join(''));
+    modPublish(modN, `r${num}${checked ? '1' : '0'}`);
+  }
+
   // 8. 릴레이 설정 편집 모달
   function openEditModal(ch) {
     const r = relayConfigs.find(x => x.ch === ch);
@@ -1482,7 +1600,13 @@
   document.getElementById('btnAllOn').addEventListener('click', () => publishCommand('all1'));
   document.getElementById('btnAllOff').addEventListener('click', () => publishCommand('all0'));
   document.getElementById('btnRevAll').addEventListener('click', () => publishCommand('revall'));
-  document.getElementById('btnRead').addEventListener('click', () => publishCommand('read'));
+  document.getElementById('btnRead').addEventListener('click', () => {
+    publishCommand('read');
+    modList.forEach(m => { if (m.n > 1) modPublish(m.n, 'read'); });
+  });
+  document.getElementById('btnMbuscan').addEventListener('click', () => {
+    if (confirm('Modbus ID 1~16을 스캔합니다 (약 2초). 계속하시겠습니까?')) publishCommand('mbuscan');
+  });
   document.getElementById('btnSensorRead').addEventListener('click', () => publishCommand('sensor'));
 
   // ---- Security events ----
