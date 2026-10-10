@@ -573,29 +573,29 @@
     </div>
   </header>
 
-  <!-- Environment Sensor (BME280) Top Monitor -->
+  <!-- Environment Sensor (SHT30 remote) Top Monitor -->
   <div class="panel">
     <div class="panel-header">
-      <span class="panel-title">🌡 Environment · BME280</span>
+      <span class="panel-title">🌡 Environment · SHT30 (원격)</span>
       <span style="font-size: 0.72rem; color: var(--text-muted);" id="envState">센서 대기 중</span>
     </div>
-    <div class="env-grid">
+    <div class="env-grid" style="grid-template-columns: 1fr 1fr;">
       <div class="env-card">
         <div class="env-icon">🌡</div>
         <div class="env-val" id="envTemp">--.-℃</div>
-        <div class="env-label">온도 → 7번</div>
+        <div class="env-label">온도 (SHT)</div>
       </div>
       <div class="env-card">
         <div class="env-icon">💧</div>
         <div class="env-val" id="envHum">--.-%</div>
-        <div class="env-label">습도 → 8번</div>
+        <div class="env-label">습도 (SHT)</div>
       </div>
-      <div class="env-card">
+      <div class="env-card" style="display:none;">
         <div class="env-icon">🧭</div>
         <div class="env-val" id="envPress">----hPa</div>
         <div class="env-label">기압</div>
       </div>
-      <div class="env-card">
+      <div class="env-card" style="display:none;">
         <div class="env-icon">⛰</div>
         <div class="env-val" id="envAlt">----m</div>
         <div class="env-label">고도</div>
@@ -1123,6 +1123,7 @@
         mqttClient.subscribe(subBase + 'config');
         mqttClient.subscribe(subBase + 'sensor');
         mqttClient.subscribe(subBase + 'sensor_config');
+        mqttClient.subscribe(subBase + 'sht');
         mqttClient.subscribe(subBase + 'security/alert');
         mqttClient.subscribe(subBase + 'security/status');
         mqttClient.subscribe(subBase + 'security/config');
@@ -1332,7 +1333,7 @@
         addLog('SYS', '습도 미지원 모듈(' + d.model + '): 8번 습도 자동제어 비활성');
       }
     }
-    if (d.hasSensor === false) document.getElementById('envState').textContent = 'BME280 없음';
+    if (d.hasSensor === false) document.getElementById('envState').textContent = '로컬 센서 없음';
   }
 
   function handleIncomingMessage(topic, payload) {
@@ -1356,6 +1357,16 @@
         const d = JSON.parse(payload);
         applySecConfig(d);
         addLog('CFG', '방범 설정(존·카메라) 동기화 완료');
+      } catch(e) {}
+      return;
+    }
+    if (topic.endsWith('/sht')) {
+      try {
+        const d = JSON.parse(payload);
+        updateEnvUI(d.t, d.h, null, null);
+        document.getElementById('envState').textContent = `SHT${d.sid} · 업데이트 ` + new Date().toLocaleTimeString();
+        markDeviceAlive();
+        addLog('ENV', `SHT${d.sid} T:${d.t}℃ H:${d.h}%`);
       } catch(e) {}
       return;
     }
